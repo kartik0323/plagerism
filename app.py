@@ -93,7 +93,7 @@ def get_similarity_list(texts, filenames=None):
     return similarity_list
 
 def get_similarity_list2(text, url_list):
-    """Calculate similarity between the input text and the text retrieved from URLs."""
+    """Calculate similarity between the input text and the text retrieved from RLs."""
     similarity_list = []
     total_similarity = 0  # To calculate total similarity from internet sources
     valid_url_count = 0  # Count valid URLs
