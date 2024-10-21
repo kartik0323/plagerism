@@ -1,17 +1,16 @@
 import streamlit as st
 import pandas as pd
 import nltk
+nltk.download('punkt')
 from nltk import tokenize
 from bs4 import BeautifulSoup
 import requests
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import io
 import docx2txt
 from PyPDF2 import PdfReader
 import plotly.express as px
-
-nltk.download('punkt')
 
 def get_sentences(text):
     """Tokenize the input text into sentences."""
@@ -78,12 +77,9 @@ def get_text(url):
 def get_similarity(text1, text2):
     """Calculate cosine similarity between two text documents."""
     text_list = [text1, text2]
-    tfidf = TfidfVectorizer(stop_words='english')
-    try:
-        tfidf_matrix = tfidf.fit_transform(text_list)
-        return cosine_similarity(tfidf_matrix)[0][1]
-    except ValueError:
-        return 0  # Return 0 similarity if there's an issue with the input
+    cv = CountVectorizer()
+    count_matrix = cv.fit_transform(text_list)
+    return cosine_similarity(count_matrix)[0][1]
 
 def get_similarity_list(texts, filenames=None):
     """Get pairwise similarity scores between texts."""
@@ -158,7 +154,7 @@ else:
 
 if st.button('Check for plagiarism or find similarities'):
     st.write("### Checking for plagiarism or finding similarities...")
-    if not text.strip():
+    if not text:
         st.write("### No text found for plagiarism check or finding similarities.")
         st.stop()
     
@@ -170,6 +166,7 @@ if st.button('Check for plagiarism or find similarities'):
         sentences = get_sentences(text)
         urls = [get_url(sentence) for sentence in sentences]
 
+        # Check if all URLs are valid
         if not any(urls):
             st.write("### No URLs found for plagiarism detection.")
             st.stop()
@@ -178,12 +175,15 @@ if st.button('Check for plagiarism or find similarities'):
         df = pd.DataFrame({'Sentence': sentences, 'URL': urls, 'Similarity': similarity_list}).sort_values(by=['Similarity'], ascending=True)
         df = df.reset_index(drop=True)
 
-        percentage_similarity = (avg_similarity * 100)
+        # Calculate and display the percentage of similarity
+        percentage_similarity = (avg_similarity * 100)  # Convert to percentage
         st.write(f"### Average Percentage Similarity with Internet Content: {percentage_similarity:.2f}%")
 
+        # Make URLs clickable in the DataFrame
         if 'URL' in df.columns:
             df['URL'] = df['URL'].apply(lambda x: f'<a href="{x}" target="_blank">{x}</a>' if x else '')
         
+        # Center align URL column header
         df_html = df.to_html(escape=False)
         if 'URL' in df.columns:
             df_html = df_html.replace('<th>URL</th>', '<th style="text-align: center;">URL</th>')
