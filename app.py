@@ -172,7 +172,7 @@ if st.button('Check for plagiarism or find similarities'):
             st.stop()
 
         similarity_list, avg_similarity = get_similarity_list2(text, urls)
-        df = pd.DataFrame({'Sentence': sentences, 'URL': urls, 'Similarity': similarity_list}).sort_values(by=['Similarity'], ascending=True)
+        df = pd.DataFrame({'Sentence': sentences, 'URL': urls})
         df = df.reset_index(drop=True)
 
         # Calculate and display the percentage of similarity
