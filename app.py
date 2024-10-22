@@ -1,21 +1,38 @@
 import streamlit as st
 import pandas as pd
 import nltk
-nltk.download('punkt')
 from nltk import tokenize
 from bs4 import BeautifulSoup
 import requests
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from transformers import BertTokenizer, BertModel
+import torch
 import io
 import docx2txt
 from PyPDF2 import PdfReader
 import plotly.express as px
 
+# Download the NLTK 'punkt' package for sentence tokenization
+nltk.download('punkt')
+
+# Initialize BERT tokenizer and model
+try:
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+except Exception as e:
+    st.error(f"Error loading BERT model: {e}")
+    st.stop()
+
+def get_bert_embeddings(text):
+    """Compute BERT embeddings for the input text."""
+    inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    embeddings = outputs.last_hidden_state[:, 0, :]
+    return embeddings
+
 def get_sentences(text):
     """Tokenize the input text into sentences."""
-    sentences = tokenize.sent_tokenize(text)
-    return sentences
+    return tokenize.sent_tokenize(text)
 
 def get_url(sentence):
     """Retrieve the first search result URL for a given sentence from Google."""
@@ -31,9 +48,9 @@ def get_url(sentence):
         soup = BeautifulSoup(res.text, 'html.parser')
         divs = soup.find_all('div', class_='yuRUbf')
         urls = [div.find('a')['href'] for div in divs if div.find('a')]
-        return urls[0] if urls and "youtube" not in urls[0] else None
+        return urls[0] if urls else None
     except Exception as e:
-        print(f"Error fetching URL: {e}")
+        st.warning(f"Error fetching URL for '{sentence[:30]}...': {e}")
         return None
 
 def read_text_file(file):
@@ -50,7 +67,7 @@ def read_pdf_file(file):
     text = ""
     pdf_reader = PdfReader(file)
     for page in pdf_reader.pages:
-        text += page.extract_text()
+        text += page.extract_text() or ""
     return text
 
 def get_text_from_file(uploaded_file):
@@ -71,15 +88,15 @@ def get_text(url):
         soup = BeautifulSoup(response.text, 'html.parser')
         return ' '.join(map(lambda p: p.text, soup.find_all('p')))
     except Exception as e:
-        print(f"Error fetching text from URL: {e}")
+        st.warning(f"Error fetching text from URL: {e}")
         return ""
 
 def get_similarity(text1, text2):
-    """Calculate cosine similarity between two text documents."""
-    text_list = [text1, text2]
-    cv = CountVectorizer()
-    count_matrix = cv.fit_transform(text_list)
-    return cosine_similarity(count_matrix)[0][1]
+    """Calculate cosine similarity between two text documents using BERT embeddings."""
+    embeddings1 = get_bert_embeddings(text1)
+    embeddings2 = get_bert_embeddings(text2)
+    similarity = torch.nn.functional.cosine_similarity(embeddings1, embeddings2).item()
+    return similarity
 
 def get_similarity_list(texts, filenames=None):
     """Get pairwise similarity scores between texts."""
@@ -93,10 +110,10 @@ def get_similarity_list(texts, filenames=None):
     return similarity_list
 
 def get_similarity_list2(text, url_list):
-    """Calculate similarity between the input text and the text retrieved from RLs."""
+    """Calculate similarity between the input text and the text retrieved from URLs."""
     similarity_list = []
-    total_similarity = 0  # To calculate total similarity from internet sources
-    valid_url_count = 0  # Count valid URLs
+    total_similarity = 0
+    valid_url_count = 0
 
     for url in url_list:
         if url is not None:
@@ -106,7 +123,7 @@ def get_similarity_list2(text, url_list):
             total_similarity += similarity
             valid_url_count += 1
         else:
-            similarity_list.append(0)  # No URL found, set similarity to 0
+            similarity_list.append(0)
 
     avg_similarity = total_similarity / valid_url_count if valid_url_count > 0 else 0
     return similarity_list, avg_similarity
@@ -115,24 +132,16 @@ def plot_results(df):
     """Generate plots for the similarity results."""
     plot_types = {
         "scatter": px.scatter(df, x='File 1', y='File 2', color='Similarity', title='Similarity Scatter Plot'),
-        "line": px.line(df, x='File 1', y='File 2', color='Similarity', title='Similarity Line Chart'),
         "bar": px.bar(df, x='File 1', y='Similarity', color='File 2', title='Similarity Bar Chart'),
-        "pie": px.pie(df, values='Similarity', names='File 1', title='Similarity Pie Chart'),
-        "box": px.box(df, x='File 1', y='Similarity', title='Similarity Box Plot'),
-        "histogram": px.histogram(df, x='Similarity', title='Similarity Histogram'),
-        "3d_scatter": px.scatter_3d(df, x='File 1', y='File 2', z='Similarity', color='Similarity', title='Similarity 3D Scatter Plot'),
-        "violin": px.violin(df, y='Similarity', x='File 1', title='Similarity Violin Plot'),
+        "histogram": px.histogram(df, x='Similarity', title='Similarity Histogram')
     }
     
     for plot in plot_types.values():
         st.plotly_chart(plot, use_container_width=True)
 
-st.set_page_config(page_title='Plagiarism Detection')
-st.title('Plagiarism Detector')
+st.set_page_config(page_title='Plagiarism Detection with BERT')
+st.title('Plagiarism Detector using BERT')
 
-st.write("""
-### Enter the text or upload a file to check for plagiarism or find similarities between files
-""")
 option = st.radio("Select input option:", ('Enter text', 'Upload file', 'Find similarities between files'))
 
 if option == 'Enter text':
@@ -166,7 +175,6 @@ if st.button('Check for plagiarism or find similarities'):
         sentences = get_sentences(text)
         urls = [get_url(sentence) for sentence in sentences]
 
-        # Check if all URLs are valid
         if not any(urls):
             st.write("### No URLs found for plagiarism detection.")
             st.stop()
@@ -175,15 +183,12 @@ if st.button('Check for plagiarism or find similarities'):
         df = pd.DataFrame({'Sentence': sentences, 'URL': urls})
         df = df.reset_index(drop=True)
 
-        # Calculate and display the percentage of similarity
-        percentage_similarity = (avg_similarity * 100)  # Convert to percentage
+        percentage_similarity = (avg_similarity * 100)
         st.write(f"### Average Percentage Similarity with Internet Content: {percentage_similarity:.2f}%")
 
-        # Make URLs clickable in the DataFrame
         if 'URL' in df.columns:
             df['URL'] = df['URL'].apply(lambda x: f'<a href="{x}" target="_blank">{x}</a>' if x else '')
         
-        # Center align URL column header
         df_html = df.to_html(escape=False)
         if 'URL' in df.columns:
             df_html = df_html.replace('<th>URL</th>', '<th style="text-align: center;">URL</th>')
